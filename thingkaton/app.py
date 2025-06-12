@@ -1,3 +1,4 @@
+from thingkaton.wakurobotics.care.devices.v1.error_schema import DeviceErrors, Error
 from thingkaton.wakurobotics.care.devices.v1.factsheet_schema import DeviceFactsheet
 from thingkaton.wakurobotics.care.client import Client, get_timestamp
 
@@ -7,21 +8,105 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from loguru import logger
+import asyncio
+from contextlib import asynccontextmanager
 from nova import Controller, Nova
 from nova import MotionSettings, Nova
 from nova.actions import cartesian_ptp, joint_ptp
 from nova.api import models
 from nova.cell import virtual_controller
 from nova.types import Pose
+import traceback
+import wandelbots_api_client as wb
 
 from thingkaton.wakurobotics.care.devices.v1.order_schema import DeviceOrder
 import uuid
 
 
+waku_client_password = config("WAKU_CLIENT_PASSWORD", cast=str)
+
+
+
+
+async def report_safety_state(robot_controller_state: wb.models.RobotControllerState, waku_client: Client):
+    current_safety_state = robot_controller_state.safety_state
+    if current_safety_state not in [
+        "SAFETY_STATE_ROBOT_EMERGENCY_STOP"
+    ]:
+        return
+        
+
+    waku_error = Error(
+        title="Robot Controller Safety State",
+        code=current_safety_state,
+        description="Safety state of the robot controller has changed.",
+        component="robot_controller",
+        severity=4,
+    )
+    device_errors = DeviceErrors(
+        timestamp=get_timestamp(),
+        activeErrors=[waku_error]
+    )
+    logger.info(f"Reporting safety state: {current_safety_state}")
+    waku_client.publish_device_errors("ur", device_errors)
+
+
+async def sync_device_state_to_waku():
+    previous_safety_state = None
+
+    waku_client = await get_waku_client()
+    while True:
+        try:
+            async with Nova() as nova:
+                print("test")
+                cell = nova.cell()
+                controllers = await cell.controllers()
+                controller = await cell.controller("ur")
+                await register_waku_device(waku_client, controller)
+
+                state_generator = nova._api_client.controller_api.stream_robot_controller_state("cell", "ur", 200)
+                print(controllers)
+                async for state in state_generator:
+                    state: wb.models.RobotControllerState = state
+                    current_safety_state = state.safety_state
+                    
+                    # Only print when safety state changes
+                    if current_safety_state != previous_safety_state:
+                        print(f"Safety state changed: {previous_safety_state} -> {current_safety_state}")
+                        previous_safety_state = current_safety_state
+                        await report_safety_state(state, waku_client)
+
+
+        except asyncio.CancelledError:
+            logger.info("Background task cancelled, exiting sync loop.")
+            break
+        except Exception as e:
+            logger.error(f"Error syncing device state to Waku: {e}")
+            traceback.print_stack()
+            await asyncio.sleep(5)  # Wait before retrying on error
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for FastAPI application"""
+    # Startup
+    logger.info("Starting background task...")
+    background_task = asyncio.create_task(sync_device_state_to_waku())
+    
+    yield
+    
+    # Shutdown
+    if background_task:
+        logger.info("Stopping background task...")
+        background_task.cancel()
+        try:
+            await background_task
+        except asyncio.CancelledError:
+            logger.info("Background task cancelled successfully")
+
 
 CELL_ID = config("CELL_ID", default="cell", cast=str)
 BASE_PATH = config("BASE_PATH", default="", cast=str)
-app = FastAPI(title="thingkaton", root_path=BASE_PATH)
+app = FastAPI(title="thingkaton", root_path=BASE_PATH, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -119,7 +204,7 @@ async def push_data():
         async for motion_state in motion_iter:
             print(motion_state)
         
-        publisher.publish_device_order(controller.id, DeviceOrder(timestamp=get_timestamp(), id=cycle_id, status="finished"))
+        publisher.publish_device_order(controller.id, DeviceOrder(timestamp=get_timestamp(), id=cycle_id, status="finished", parameters={}))
 
 
 
@@ -130,7 +215,7 @@ async def get_waku_client() -> Client:
         broker="mqtt.waku-robotics.com",
         port=8883,
         username="wandelbots",
-        password="x$!&8ePN5!yZ8w6XKAVp!ZQ9"
+        password=waku_client_password
     )
     publisher.connect()
     return publisher
@@ -142,7 +227,7 @@ async def register_waku_device(publisher: Client, controller: Controller):
         device_values=DeviceFactsheet(
             # put controller id here
             serial=controller.id,
-            name="Wandelbots NOVA Cloud",
+            name=f"Wandelbots - {controller.name}",
             # map to the vandelbots controller data
             manufacturer="universal-robots",
             model="ur3e",
