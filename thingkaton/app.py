@@ -90,7 +90,7 @@ async def push_data():
         )
         await register_waku_device(publisher, controller)
         cycle_id = str(uuid.uuid4())
-        publisher.publish_device_order("simulator", DeviceOrder(timestamp=get_timestamp(),id=cycle_id, status="started"))
+        publisher.publish_device_order(controller.id, DeviceOrder(timestamp=get_timestamp(),id=cycle_id, status="started"))
 
         # Connect to the controller and activate motion groups
         async with controller[0] as motion_group:
@@ -119,7 +119,7 @@ async def push_data():
         async for motion_state in motion_iter:
             print(motion_state)
         
-        publisher.publish_device_order("simulator", DeviceOrder(timestamp=get_timestamp(), id=cycle_id, status="finished"))
+        publisher.publish_device_order(controller.id, DeviceOrder(timestamp=get_timestamp(), id=cycle_id, status="finished"))
 
 
 
