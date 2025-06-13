@@ -2,13 +2,12 @@ import paho.mqtt.client as mqtt
 from thingkaton.wakurobotics.care.devices.v1 import (
     DeviceValues,
     DeviceFactsheet,
+    DeviceOrder,
+    DeviceErrors,
     Connection,
     ConnectionStatus,
 )
 from datetime import datetime
-
-from thingkaton.wakurobotics.care.devices.v1.error_schema import DeviceErrors
-from thingkaton.wakurobotics.care.devices.v1.order_schema import DeviceOrder
 
 VERSION = "v1"
 
@@ -123,22 +122,6 @@ class Client:
 
         return self.client.publish(topic, payload, qos=0, retain=False)
 
-    def disconnect(self):
-        """Disconnect from the MQTT broker."""
-        self.client.loop_stop()
-
-        # last will is not sent when we disconnect cleanly so we'll disconnect us here manually
-        self.client.publish(
-            f"{VERSION}/{self.connection_id}",
-            payload=Connection(
-                status=ConnectionStatus.offline, timestamp=get_timestamp()
-            ).model_dump_json(),
-            qos=1,
-            retain=True,
-        )
-
-        return self.client.disconnect()
-    
     def publish_device_order(self, serial: str, message: DeviceOrder):
         """
         Publish a validated DeviceOrder message.
@@ -160,3 +143,19 @@ class Client:
         payload = message.model_dump_json()
 
         return self.client.publish(topic, payload, qos=0, retain=False)
+
+    def disconnect(self):
+        """Disconnect from the MQTT broker."""
+        self.client.loop_stop()
+
+        # last will is not sent when we disconnect cleanly so we'll disconnect us here manually
+        self.client.publish(
+            f"{VERSION}/{self.connection_id}",
+            payload=Connection(
+                status=ConnectionStatus.offline, timestamp=get_timestamp()
+            ).model_dump_json(),
+            qos=1,
+            retain=True,
+        )
+
+        return self.client.disconnect()
