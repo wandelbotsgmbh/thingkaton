@@ -47,7 +47,9 @@ async def report_safety_state(robot_controller_state: wb.models.RobotControllerS
             activeErrors=[waku_error]
         )
         logger.info(f"Reporting safety state for {controller_id}: {current_safety_state}")
-        waku_client.publish_device_errors(controller_id, device_errors)
+        response = waku_client.publish_device_errors(controller_id, device_errors)
+        response.wait_for_publish(timeout=1)
+        logger.info(f"Response from Waku after reporting safety state: {response}, is_published={response.is_published()}")
 
 
     if current_safety_state == "SAFETY_STATE_NORMAL":
@@ -56,7 +58,9 @@ async def report_safety_state(robot_controller_state: wb.models.RobotControllerS
             activeErrors=[]
         )
         logger.info(f"Reporting safety state for {controller_id}: {current_safety_state}")
-        waku_client.publish_device_errors(controller_id, device_errors)
+        response = waku_client.publish_device_errors(controller_id, device_errors)
+        response.wait_for_publish(timeout=1)
+        logger.info(f"Response from Waku after reporting safety state: {response}, is_published={response.is_published()}")
 
 
 
@@ -611,6 +615,10 @@ async def get_app_icon():
 
 
 async def get_waku_client() -> Client:
+    if global_waku_client is not None and global_waku_client.client.is_connected():
+        logger.info("Waku client already connected")
+        return global_waku_client
+
     logger.info("Initializing Waku client")
     publisher = Client(
         customer_id="manufacturingx",
