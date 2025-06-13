@@ -28,24 +28,36 @@ waku_client_password = config("WAKU_CLIENT_PASSWORD", cast=str)
 async def report_safety_state(robot_controller_state: wb.models.RobotControllerState, waku_client: Client, controller_id: str):
     current_safety_state = robot_controller_state.safety_state
     if current_safety_state not in [
-        "SAFETY_STATE_ROBOT_EMERGENCY_STOP"
+        "SAFETY_STATE_ROBOT_EMERGENCY_STOP",
+        "SAFETY_STATE_NORMAL"
     ]:
         return
         
 
-    waku_error = Error(
-        title="Robot Controller Safety State",
-        code=current_safety_state,
-        description="Safety state of the robot controller has changed.",
-        component="robot_controller",
-        severity=4,
-    )
-    device_errors = DeviceErrors(
-        timestamp=get_timestamp(),
-        activeErrors=[waku_error]
-    )
-    logger.info(f"Reporting safety state for {controller_id}: {current_safety_state}")
-    waku_client.publish_device_errors(controller_id, device_errors)
+    if current_safety_state == "SAFETY_STATE_ROBOT_EMERGENCY_STOP":
+        waku_error = Error(
+            title="Robot Controller Safety State",
+            code=current_safety_state,
+            description="Safety state of the robot controller has changed.",
+            component="robot_controller",
+            severity=4,
+        )
+        device_errors = DeviceErrors(
+            timestamp=get_timestamp(),
+            activeErrors=[waku_error]
+        )
+        logger.info(f"Reporting safety state for {controller_id}: {current_safety_state}")
+        waku_client.publish_device_errors(controller_id, device_errors)
+
+
+    if current_safety_state == "SAFETY_STATE_NORMAL":
+        device_errors = DeviceErrors(
+            timestamp=get_timestamp(),
+            activeErrors=[]
+        )
+        logger.info(f"Reporting safety state for {controller_id}: {current_safety_state}")
+        waku_client.publish_device_errors(controller_id, device_errors)
+
 
 
 def map_robot_controller_to_waku_device(controller: wb.models.RobotController) -> DeviceFactsheet:
@@ -107,6 +119,7 @@ class ControllerManager:
         
     async def initialize(self):
         """Initialize the controller manager"""
+        ## TODO: don't connect all the time
         self.waku_client = await get_waku_client()
         self.nova = Nova()
         await self.nova.__aenter__()
