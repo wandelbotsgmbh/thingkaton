@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from loguru import logger
 import asyncio
 from contextlib import asynccontextmanager
-from nova import Controller, Nova
+from nova import Nova
 import traceback
 import wandelbots_api_client as wb
 from pydantic import BaseModel
@@ -110,17 +110,15 @@ def map_robot_controller_to_waku_device(controller: wb.models.RobotController) -
 class ControllerManager:
     """Manages state streaming for multiple controllers dynamically"""
     
-    def __init__(self):
+    def __init__(self, waku_client: Client):
         self.active_controllers = {}  # controller_id -> task
-        self.waku_client = None
+        self.waku_client = waku_client
         self.nova = None
         self.cell = None
         self.controller_states = {}  # controller_id -> previous_safety_state
         
     async def initialize(self):
         """Initialize the controller manager"""
-        ## TODO: don't connect all the time
-        self.waku_client = await get_waku_client()
         self.nova = Nova()
         await self.nova.__aenter__()
         self.cell = self.nova.cell()
@@ -273,12 +271,18 @@ class ControllerResponse(BaseModel):
 
 # Global controller manager instance for API access
 global_controller_manager: Optional[ControllerManager] = None
+# Global Waku client instance
+global_waku_client: Optional[Client] = None
 
 
 async def sync_device_state_to_waku():
     """Main function to sync device states to Waku with resilient controller management"""
     global global_controller_manager
-    global_controller_manager = ControllerManager()
+    global global_waku_client
+    
+    # Initialize Waku client once
+    global_waku_client = await get_waku_client()
+    global_controller_manager = ControllerManager(global_waku_client)
     
     try:
         await global_controller_manager.initialize()
@@ -305,6 +309,10 @@ async def sync_device_state_to_waku():
     finally:
         await global_controller_manager.cleanup()
         global_controller_manager = None
+        # Disconnect Waku client
+        if global_waku_client:
+            global_waku_client.disconnect()
+            global_waku_client = None
         logger.info("Controller manager cleaned up")
 
 @asynccontextmanager
@@ -603,6 +611,7 @@ async def get_app_icon():
 
 
 async def get_waku_client() -> Client:
+    logger.info("Initializing Waku client")
     publisher = Client(
         customer_id="manufacturingx",
         connection_id="wandelbots",
