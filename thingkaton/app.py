@@ -48,6 +48,53 @@ async def report_safety_state(robot_controller_state: wb.models.RobotControllerS
     waku_client.publish_device_errors(controller_id, device_errors)
 
 
+def map_robot_controller_to_waku_device(controller: wb.models.RobotController) -> DeviceFactsheet:
+    """Map Wandelbots controller to Waku device factsheet"""
+    
+    manufacturer = None
+    kind = None
+    if isinstance(controller.configuration.actual_instance, wb.models.AbbController):
+        manufacturer = "abb"
+        kind = controller.configuration.actual_instance.kind.lower()
+    elif isinstance(controller.configuration.actual_instance, wb.models.FanucController):
+        manufacturer = "fanuc"
+        kind = controller.configuration.actual_instance.kind.lower()
+    elif isinstance(controller.configuration.actual_instance, wb.models.KukaController):
+        manufacturer = "kuka"
+        kind = controller.configuration.actual_instance.kind.lower()
+    elif isinstance(controller.configuration.actual_instance, wb.models.UniversalrobotsController):
+        manufacturer = "universal-robots"
+        kind = controller.configuration.actual_instance.kind.lower()
+    elif isinstance(controller.configuration.actual_instance, wb.models.YaskawaController):
+        manufacturer = "yaskawa"
+        kind = controller.configuration.actual_instance.kind.lower()
+    elif isinstance(controller.configuration.actual_instance, wb.models.VirtualController):
+        actual_instance: wb.models.VirtualController = controller.configuration.actual_instance
+        if actual_instance.manufacturer.lower() == "universalrobots":
+            manufacturer = "universal-robots"
+        else:
+            manufacturer = actual_instance.manufacturer.lower()
+
+        result = actual_instance.type.split("-")[-1]
+        kind = result.replace(" ", "-").replace("_", "-").lower()
+    
+    logger.info(f"Mapping controller {controller.name} to Waku device: {manufacturer} {kind}")
+
+
+    device_fact_sheet=DeviceFactsheet(
+            # put controller id here
+            serial=controller.name,
+            name=f"Wandelbots Nova Cloud - {controller.name} - {manufacturer} {kind}",
+            # map to the vandelbots controller data
+            manufacturer=manufacturer,
+            model=kind,
+            version="1.0.0",
+            deployment="Default",
+    )
+    return device_fact_sheet
+
+
+
 class ControllerManager:
     """Manages state streaming for multiple controllers dynamically"""
     
@@ -88,12 +135,14 @@ class ControllerManager:
         logger.info(f"Starting state streaming for controller: {controller_id}")
         
         try:
-            controller = await self.cell.controller(controller_id)
-
             # find model name to pass to waku
             # there is a better way of getting this information from API, for now leaving as it
             controller_configuration = await self.nova._api_client.controller_api.get_robot_controller(cell="cell", controller=controller_id)
-            await register_waku_device(self.waku_client, controller, controller_configuration.name)
+            devicefact_sheet = map_robot_controller_to_waku_device(controller_configuration)
+            await register_waku_device(
+                self.waku_client,
+                devicefact_sheet
+            )
             
             state_generator = self.nova._api_client.controller_api.stream_robot_controller_state(
                 "cell", controller_id, 200
@@ -553,19 +602,10 @@ async def get_waku_client() -> Client:
     return publisher
 
 
-async def register_waku_device(publisher: Client, controller: Controller, controller_name: str):
+async def register_waku_device(publisher: Client, device_fact_sheet: DeviceFactsheet):
     publisher.register_device(
-        serial=controller.id,
-        device_values=DeviceFactsheet(
-            # put controller id here
-            serial=controller.id,
-            name=f"Wandelbots Nova Cloud",
-            # map to the vandelbots controller data
-            manufacturer="universal-robots",
-            model="ur3e",
-            version="1.0.0",
-            deployment="Default",
-        )
+        serial=device_fact_sheet.serial,
+        device_values=device_fact_sheet
     )
 
-    publisher.connect_device(serial=controller.id)
+    publisher.connect_device(serial=device_fact_sheet.serial)
