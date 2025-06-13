@@ -82,8 +82,9 @@ def map_robot_controller_to_waku_device(controller: wb.models.RobotController) -
         manufacturer = "kuka"
         kind = controller.configuration.actual_instance.kind.lower()
     elif isinstance(controller.configuration.actual_instance, wb.models.UniversalrobotsController):
+        # kind of the universal robot is not working correctly, so we use the name, the name has to be ur3e etc..
         manufacturer = "universal-robots"
-        kind = controller.configuration.actual_instance.kind.lower()
+        kind = controller.name.lower()
     elif isinstance(controller.configuration.actual_instance, wb.models.YaskawaController):
         manufacturer = "yaskawa"
         kind = controller.configuration.actual_instance.kind.lower()
