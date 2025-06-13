@@ -25,7 +25,9 @@ waku_client_password = config("WAKU_CLIENT_PASSWORD", cast=str)
 
 
 
-async def report_safety_state(robot_controller_state: wb.models.RobotControllerState, waku_client: Client, controller_id: str):
+async def report_safety_state(robot_controller_state: wb.models.RobotControllerState, controller_id: str):
+    waku_client = await get_waku_client()
+
     current_safety_state = robot_controller_state.safety_state
     if current_safety_state not in [
         "SAFETY_STATE_ROBOT_EMERGENCY_STOP",
@@ -174,7 +176,7 @@ class ControllerManager:
                     logger.info(f"Controller {controller_id} safety state changed: {previous_safety_state} -> {current_safety_state}")
                     previous_safety_state = current_safety_state
                     self.controller_states[controller_id] = current_safety_state
-                    await report_safety_state(state, self.waku_client, controller_id)
+                    await report_safety_state(state, controller_id)
                     
         except asyncio.CancelledError:
             logger.info(f"State streaming cancelled for controller: {controller_id}")
