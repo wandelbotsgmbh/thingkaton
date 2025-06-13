@@ -25,7 +25,7 @@ waku_client_password = config("WAKU_CLIENT_PASSWORD", cast=str)
 
 
 
-async def report_safety_state(robot_controller_state: wb.models.RobotControllerState, controller_id: str):
+async def report_safety_state(robot_controller_state: wb.models.RobotControllerState, controller_id: str, optimizer_setup: wb.models.OptimizerSetup):
     waku_client = await get_waku_client()
 
     current_safety_state = robot_controller_state.safety_state
@@ -44,6 +44,10 @@ async def report_safety_state(robot_controller_state: wb.models.RobotControllerS
             description="Safety state of the robot controller has changed.",
             component="robot_controller",
             severity=4,
+            parameters={
+                "controller_state": robot_controller_state.model_dump(),
+                "optimizer_setup": optimizer_setup.model_dump(),
+            },
         )
         device_errors = DeviceErrors(
             timestamp=get_timestamp(),
@@ -157,6 +161,11 @@ class ControllerManager:
             # find model name to pass to waku
             # there is a better way of getting this information from API, for now leaving as it
             controller_configuration = await self.nova._api_client.controller_api.get_robot_controller(cell="cell", controller=controller_id)
+            controller = await self.cell.controller(controller_id)
+            # TODO: double check if this is correct way, e.g. fanuc
+            motion_group_id = controller[0].motion_group_id
+            optimizer_setup = await self.nova._api_client.motion_group_infos_api.get_optimizer_configuration(cell="cell", motion_group=motion_group_id)
+
             devicefact_sheet = map_robot_controller_to_waku_device(controller_configuration)
             await register_waku_device(
                 self.waku_client,
@@ -178,7 +187,7 @@ class ControllerManager:
                     logger.info(f"Controller {controller_id} safety state changed: {previous_safety_state} -> {current_safety_state}")
                     previous_safety_state = current_safety_state
                     self.controller_states[controller_id] = current_safety_state
-                    await report_safety_state(state, controller_id)
+                    await report_safety_state(state, controller_id, optimizer_setup)
                     
         except asyncio.CancelledError:
             logger.info(f"State streaming cancelled for controller: {controller_id}")
