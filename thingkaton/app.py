@@ -31,13 +31,14 @@ async def report_safety_state(robot_controller_state: wb.models.RobotControllerS
     current_safety_state = robot_controller_state.safety_state
     if current_safety_state not in [
         "SAFETY_STATE_ROBOT_EMERGENCY_STOP",
+        "SAFETY_STATE_PROTECTIVE_STOP",
         "SAFETY_STATE_NORMAL",
         "SAFETY_STATE_STOP_1"
     ]:
         return
         
 
-    if current_safety_state == "SAFETY_STATE_ROBOT_EMERGENCY_STOP":
+    if current_safety_state == "SAFETY_STATE_ROBOT_EMERGENCY_STOP" or current_safety_state == "SAFETY_STATE_PROTECTIVE_STOP":
         waku_error = Error(
             title="Robot Controller Safety State",
             code=current_safety_state,
